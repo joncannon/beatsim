@@ -4,7 +4,6 @@ import numpy as np
 
 #main
 
-
 i_t=0           #time
 i_aud_in=1      #T+LL - preprogrammed auditory input
 i_aud_out=2     #T - auditory cortex output
@@ -16,11 +15,8 @@ i_sma_abs=7     #status of SMA absolute timing cells -- TO DO: multiple paths
 i_sma_mod=8     #LL - output of SMA speed-modulating cells
 i_cort_tempo=9  #LL - output of cortical tempo representation
 i_sma_antic=10  #T - anticipatory output from SMA
-i_confidence=11  #T - anticipatory output from SMA
-i_tap_timer=12
-i_tap=13
-i_tap_mod = 14
-n_vars=15
+i_IBS=11  #T - anticipatory output from SMA
+n_vars=12
 
 
 class Params(object):
@@ -28,15 +24,17 @@ class Params(object):
         self.tmax = 8.
         self.dt = .001
 
-        self.abs_timer_max = .75         # The longest beat it's willing to consider
-        self.rel_timer_max_multiple = 2  # Multiple of expected interval after which timing ends
-        self.abs_noise = 0.005
+        self.abs_timer_max = .75         # Time until abs timer ends
+        self.rel_timer_max_multiple = 2  # Multiple of expected interval after which rel timing ends
+        
+        self.abs_noise = 0.005           # Amplitude of brownian drift
         self.rel_noise = 0.005
-        self.confidence_decay = .2
-        self.confidence_spike = 7
-        self.confidence_drop = 1
-        self.antic_baseline = .25#0.1 #
-        self.antic_goodline = 0.9#
+        
+        self.IBS_decay = .2       # Exponential decay rate of IBS
+        self.IBS_spike = 7        # Multiplier for IBS spike on accurate prediction
+        self.IBS_drop = 1         # Multiplier for IBS drop on inaccurate prediction
+        self.antic_baseline = .25 # 
+        self.antic_goodline = 0.9 #
         
         self.skepticism = 1
         self.imagination = 0#0.45
@@ -72,9 +70,9 @@ class Params(object):
         
     
 
-def antic_func(t, focus, confidence):
+def antic_func(t, focus, IBS):
     #return exp(-(focus*t)**2) + exp(-(focus*(t-1))**2)
-    return (1-confidence)*1 + confidence*max(0, min(max(1-focus*t, focus*(t-1)+1), -focus*(t-1)+1))
+    return (1-IBS)*1 + IBS*max(0, min(max(1-focus*t, focus*(t-1)+1), -focus*(t-1)+1))
 #    t = 2.33*t-1.10     # The multiplier determines how much beat anticipation is rushed -- 2.27 is slight.
     #return -.5*(1-t**6)*exp(-t**6/2)+1/(t**6+3) + .333
 #    return -.5*(1-t**4)*exp(-t**4/2)+1/(t**4+3) + antic_baseline
@@ -91,7 +89,7 @@ def disp_data(testnum,data,params):
         plt.subplot(3,1,1)
         plt.plot(data[testnum, :,i_t], data[testnum, :,i_sma_antic],'darkblue')
         plt.plot(data[testnum, :,i_t], data[testnum, :,i_aud_in], 'darkgreen')
-        plt.plot(data[testnum, :,i_t], data[testnum, :,i_confidence],'indigo')
+        plt.plot(data[testnum, :,i_t], data[testnum, :,i_IBS],'indigo')
 #        plt.plot(data[testnum, :,i_t], [params.antic_baseline]*len(data[testnum, :,i_t]))
 #        plt.plot(data[testnum, :,i_t], [params.antic_goodline]*len(data[testnum, :,i_t]))
         
@@ -116,9 +114,9 @@ def run_model(signals, params):
     rtmm = params.rel_timer_max_multiple  # Multiple of expected interval after which timing ends
     abs_noise = params.abs_noise
     rel_noise = params.rel_noise
-    confidence_decay = params.confidence_decay
-    confidence_spike = params.confidence_spike
-    confidence_drop = params.confidence_drop
+    IBS_decay = params.IBS_decay
+    IBS_spike = params.IBS_spike
+    IBS_drop = params.IBS_drop
     antic_baseline = params.antic_baseline
     antic_goodline = params.antic_goodline
 
@@ -143,7 +141,7 @@ def run_model(signals, params):
         data[signal_num, 0,i_put_tempo] = 100
         data[signal_num, 0,i_cort_tempo] = 100
         data[signal_num, :,i_aud_in] = params.get_input(signals[signal_num])
-        data[signal_num, 0,i_confidence] = 0
+        data[signal_num, 0,i_IBS] = 0
     
         step = 1
     
@@ -158,7 +156,7 @@ def run_model(signals, params):
             sma_mod_0 = data[signal_num, step-1,i_sma_mod]
             cort_tempo_0 = data[signal_num, step-1,i_cort_tempo]
             sma_antic_0 = data[signal_num, step-1,i_sma_antic]
-            confidence_0 = data[signal_num, step-1,i_confidence]
+            IBS_0 = data[signal_num, step-1,i_IBS]
             tap_timer_0 = data[signal_num, step-1,i_tap_timer]
             tap_mod_0 = data[signal_num, step-1,i_tap_mod]
         
@@ -166,13 +164,13 @@ def run_model(signals, params):
             
             heard_a_beat = False
             
-            if aud_out_0 + sma_antic_0 > 1+antic_baseline:  # If there is a sound in the approximate vicinity of the expected time ### (and confidence is low?)
+            if aud_out_0 + sma_antic_0 > 1+antic_baseline:  # If there is a sound in the approximate vicinity of the expected time ### (and IBS is low?)
                 heard_a_beat = True
             
             if heard_a_beat: #######
                 sma_abs = 0#prc(sma_abs_0, .05) # restart absolute timer
                 
-                if sma_abs_0<abs_timer_max and sma_abs_0>.2 and confidence_0<.75:           # Unless the absolute timer already maxed out
+                if sma_abs_0<abs_timer_max and sma_abs_0>.2 and IBS_0<.75:           # Unless the absolute timer already maxed out
                     cort_tempo = sma_abs_0                                 # cortex senses a coincidence between a specific absolute timing population and an auditory input, and sets its tempo.
                 else:                                                  # Otherwise
                     cort_tempo=cort_tempo_0                                # no tempo change
@@ -190,9 +188,9 @@ def run_model(signals, params):
                 sma_rel = rtmm                    # relative timer is stopped        
             
             
-            if (sma_rel_0 > 1 and sma_rel_0 < 1.1) or heard_a_beat:#aud_out_0 + sma_antic_0*(1+imagination*confidence_0) >= skepticism: # If there is a sound in the approximate vicinity of the expected time OR a beat is confidently anticipated
+            if (sma_rel_0 > 1 and sma_rel_0 < 1.1) or heard_a_beat:#aud_out_0 + sma_antic_0*(1+imagination*IBS_0) >= skepticism: # If there is a sound in the approximate vicinity of the expected time OR a beat is confidently anticipated
                 sma_rel = 0#prc2(sma_rel_0, rel_tap_sensitivity) 
-                if confidence_0 >.75:
+                if IBS_0 >.75:
                     sma_abs = 0#prc(sma_abs_0, .1)# restart abs timer
                 if tap_timer<2/3:
                     tap_timer= 0#prc(sma_rel_0, rel_tap_sensitivity)
@@ -204,9 +202,9 @@ def run_model(signals, params):
                 tap_timer=sma_rel 
                 tap_mod = sma_mod_0      
             
-            confidence = confidence_0 - dt*confidence_decay*confidence_0
-            confidence = confidence + heard_a_beat*confidence_spike*max(sma_antic_0-antic_goodline, 0)*(1-confidence_0)
-            confidence = confidence + heard_a_beat*confidence_drop*min(sma_antic_0-antic_goodline, 0)*confidence_0
+            IBS = IBS_0 - dt*IBS_decay*IBS_0
+            IBS = IBS + heard_a_beat*IBS_spike*max(sma_antic_0-antic_goodline, 0)*(1-IBS_0)
+            IBS = IBS + heard_a_beat*IBS_drop*min(sma_antic_0-antic_goodline, 0)*IBS_0
         
             put_tempo = cort_tempo_0                             # cortex sends tempo representation to putamen
     
@@ -217,7 +215,7 @@ def run_model(signals, params):
                 tap_mod = tap_mod_0 
    
     
-            sma_antic = antic_func(sma_rel, focus, confidence)                    # Amount of anticipation is a function of the state of the relative timer
+            sma_antic = antic_func(sma_rel, focus, IBS)                    # Amount of anticipation is a function of the state of the relative timer
         
             data[signal_num, step,i_aud_out]=aud_out
             data[signal_num, step,i_put_tempo]=put_tempo
@@ -226,7 +224,7 @@ def run_model(signals, params):
             data[signal_num, step,i_sma_mod]=sma_mod
             data[signal_num, step,i_cort_tempo]=cort_tempo
             data[signal_num, step,i_sma_antic]=sma_antic
-            data[signal_num, step,i_confidence]=confidence
+            data[signal_num, step,i_IBS]=IBS
             data[signal_num, step,i_tap_timer]=tap_timer
             data[signal_num, step,i_tap_mod]=tap_mod
             step = step+1
