@@ -30,7 +30,7 @@ class Params(object):
         self.abs_noise = 0.005             # Amplitude of brownian drift
         self.rel_noise = 0.005
         
-        self.IBS_decay = .2       # Exponential decay rate of IBS
+        self.IBS_decay = 0       # Exponential decay rate of IBS
         self.IBS_spike = 7        # Multiplier for IBS spike on accurate prediction
         self.IBS_drop = 1         # Multiplier for IBS drop on inaccurate prediction
         self.antic_baseline = .25 # Anticipation necessary to hear a beat at volume 1
@@ -51,16 +51,19 @@ class Params(object):
     
         j=0
         index=0
-        aud_input[index]=self.volume
+#        aud_input[0]=self.volume
         while (j < len(signal) and index < n_steps):
 
             
             time_counter=0
 
-            while (time_counter<signal[j] and index < n_steps-1):
+            while (time_counter<=signal[j] and index < n_steps-1):
                 index += 1
                 time_counter += self.dt
+                
             
+            print(time_counter)
+            print(index)
             j += 1
             aud_input[index]=self.volume
         return aud_input
@@ -84,7 +87,7 @@ def disp_data(testnum,data,params):
         a0.plot(data[testnum, :,i_t], data[testnum, :,i_sma_rel],'b')
         a0.plot(data[testnum, :,i_t], data[testnum, :,i_sma_abs],'r')
         a0.plot(data[testnum, :,i_t], 1/np.array(data[testnum, :,i_sma_mod]),"violet")
-        a0.set_ylim([0,1])        
+        a0.set_ylim([0,1.2])        
         a0.set_xlim([0,5]) 
                 
         a1.plot(data[testnum, :,i_t], data[testnum, :,i_IBS],'k')
@@ -93,7 +96,7 @@ def disp_data(testnum,data,params):
         a1.plot(data[testnum, :,i_t], [params.skepticism]*len(data[testnum, :,i_t]), "orange")
              
         a1.set_xlim([0,5]) 
-                
+        a1.set_ylim([0,1.2])        
         f.tight_layout()
         
         f.show()
@@ -132,16 +135,17 @@ def run_model(signals, p):
         data[signal_num, 0,i_sma_abs] = 0#abs_timer_max
         data[signal_num, 0,i_sma_rel]=0
         data[signal_num, 0,i_sma_mod] = 0
-        data[signal_num, 0,i_put_tempo] = 100
-        data[signal_num, 0,i_cort_tempo] = 100
+        data[signal_num, 0,i_put_tempo] = .5*dt
+        data[signal_num, 0,i_cort_tempo] = .5*dt
         data[signal_num, :,i_aud_in] = params.get_input(signals[signal_num])
         data[signal_num, 0,i_IBS] = 0
+        data[signal_num, 0,i_sma_antic] = 0
     
         step = 1
     
         while(step<n_steps):
 
-            aud_out_0 = data[signal_num, step-1,i_aud_out]
+            aud_out_0 = data[signal_num, step-1, i_aud_in]
             put_tempo_0 = data[signal_num, step-1,i_put_tempo]
             sma_rel_0 = data[signal_num, step-1,i_sma_rel]
             sma_abs_0 = data[signal_num, step-1,i_sma_abs]
@@ -150,7 +154,7 @@ def run_model(signals, p):
             sma_antic_0 = data[signal_num, step-1,i_sma_antic]
             IBS_0 = data[signal_num, step-1,i_IBS]
         
-            aud_out = data[signal_num, step-1, i_aud_in]
+#            aud_out = data[signal_num, step-1, i_aud_in]
             
             sma_antic = antic_func(sma_rel_0, p.focus)
             augmented_antic_signal = (1-IBS_0)*1 + IBS_0*sma_antic
@@ -185,7 +189,7 @@ def run_model(signals, p):
             if sma_rel_0 < p.rel_timer_max_multiple:              # If the relative timer hasn't yet maxed out
                 sma_rel = sma_rel_0 + p.dt*sma_mod_0 + sqrt(p.dt)*p.rel_noise*(np.random.rand()-.5)     # relative timer advances
             else:                                               # Otherwise
-                sma_rel = np.nan                    # relative timer is stopped        
+                sma_rel = sma_rel#np.nan                    # relative timer is stopped        
             
             
             
@@ -196,11 +200,13 @@ def run_model(signals, p):
 #                sma_abs = 0  #prc(sma_abs_0, .1)# restart abs timer
 
             IBS = IBS_0 - p.dt*p.IBS_decay*IBS_0
-            IBS = IBS + heard_a_beat*p.IBS_spike*max(sma_antic-p.antic_goodline, 0)*(1-IBS_0)
-            IBS = IBS + heard_a_beat*p.IBS_drop*min(sma_antic-p.antic_goodline, 0)*IBS_0
+            
+            if (not np.isnan(sma_rel)):
+                IBS = IBS + heard_a_beat*p.IBS_spike*max(sma_antic-p.antic_goodline, 0)*(1-IBS_0)
+                IBS = IBS + heard_a_beat*p.IBS_drop*min(sma_antic-p.antic_goodline, 0)*IBS_0
    
          
-            data[signal_num, step,i_aud_out]=aud_out
+#            data[signal_num, step,i_aud_out]=aud_out
             data[signal_num, step,i_put_tempo]=put_tempo
             data[signal_num, step,i_sma_rel]=sma_rel
             data[signal_num, step,i_sma_abs]=sma_abs
